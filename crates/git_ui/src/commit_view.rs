@@ -226,6 +226,10 @@ impl CommitView {
             .detach();
     }
 
+    pub fn sha(&self) -> &SharedString {
+        &self.commit.sha
+    }
+
     fn new(
         commit: CommitDetails,
         commit_diff: CommitDiff,
