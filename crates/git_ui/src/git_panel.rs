@@ -85,6 +85,7 @@ use workspace::SERIALIZATION_THROTTLE_TIME;
 use workspace::{
     Workspace,
     dock::{DockPosition, Panel, PanelEvent},
+    item::ItemHandle,
     notifications::{DetachAndPromptErr, ErrorMessagePrompt, NotificationId, NotifyResultExt},
 };
 
@@ -698,6 +699,7 @@ pub struct GitPanel {
     commit_history_scroll_handle: UniformListScrollHandle,
     commit_history_shas: Vec<Oid>,
     focused_history_entry: Option<usize>,
+    selected_history_entries: HashSet<usize>,
     history_keyboard_nav: bool,
     _repo_subscriptions: Vec<Subscription>,
 
@@ -895,6 +897,7 @@ impl GitPanel {
                 commit_history_scroll_handle: UniformListScrollHandle::new(),
                 commit_history_shas: Vec::new(),
                 focused_history_entry: None,
+                selected_history_entries: HashSet::default(),
                 history_keyboard_nav: false,
                 _repo_subscriptions: Vec::new(),
                 _settings_subscription,
@@ -5202,6 +5205,7 @@ impl GitPanel {
         let remote = self.git_remote(cx);
 
         let focused_history_entry = self.focused_history_entry;
+        let selected_history_entries = self.selected_history_entries.clone();
         let is_panel_focused = self.focus_handle.is_focused(window);
         let show_focus_border = self.history_keyboard_nav;
 
@@ -5294,6 +5298,7 @@ impl GitPanel {
 
                                     let is_unpushed = index < ahead_count;
                                     let is_focused = focused_history_entry == Some(index);
+                                    let is_selected = selected_history_entries.contains(&index);
                                     let workspace = workspace.clone();
                                     let repo = repo_weak.clone();
                                     let sha_for_click = sha_string;
@@ -5322,6 +5327,9 @@ impl GitPanel {
                                                 )
                                             },
                                         )
+                                        .when(is_selected, |this| {
+                                            this.bg(cx.theme().colors().element_selected)
+                                        })
                                         .hover(|s| s.bg(cx.theme().colors().element_hover))
                                         .child(
                                             h_flex()
@@ -5381,16 +5389,74 @@ impl GitPanel {
                                                     .ok();
                                             }
                                         })
-                                        .on_click(move |_, window, cx| {
-                                            CommitView::open(
-                                                sha_for_click.clone(),
-                                                repo.clone(),
-                                                workspace.clone(),
-                                                None,
-                                                None,
-                                                window,
-                                                cx,
-                                            );
+                                        .on_click({
+                                            let git_panel = git_panel.clone();
+                                            move |event, window, cx| {
+                                                let mut is_selected = false;
+                                                git_panel
+                                                    .update(cx, |panel, _cx| {
+                                                        is_selected = !panel
+                                                            .selected_history_entries
+                                                            .contains(&index);
+                                                        if is_selected {
+                                                            panel
+                                                                .selected_history_entries
+                                                                .insert(index);
+                                                        } else {
+                                                            panel
+                                                                .selected_history_entries
+                                                                .remove(&index);
+                                                        }
+                                                    })
+                                                    .ok();
+                                                git_panel
+                                                    .update(cx, |_panel, cx| {
+                                                        cx.notify();
+                                                    })
+                                                    .ok();
+                                                if event.click_count() == 2 {
+                                                    if is_selected {
+                                                        CommitView::open(
+                                                            sha_for_click.clone(),
+                                                            repo.clone(),
+                                                            workspace.clone(),
+                                                            None,
+                                                            None,
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    } else {
+                                                        workspace
+                                                            .update(cx, |workspace, cx| {
+                                                                let pane = workspace.active_pane();
+                                                                pane.update(cx, |pane, cx| {
+                                                                    let existing = pane
+                                                                        .items()
+                                                                        .filter_map(|item| {
+                                                                            item.downcast::<
+                                                                                CommitView,
+                                                                            >()
+                                                                        })
+                                                                        .find(|view| {
+                                                                            view.read(cx).sha()
+                                                                                == &sha_for_click
+                                                                        });
+                                                                    if let Some(existing) = existing
+                                                                    {
+                                                                        pane.remove_item(
+                                                                            existing.item_id(),
+                                                                            false,
+                                                                            false,
+                                                                            window,
+                                                                            cx,
+                                                                        );
+                                                                    }
+                                                                });
+                                                            })
+                                                            .ok();
+                                                    }
+                                                }
+                                            }
                                         })
                                         .into_any_element()
                                 })
