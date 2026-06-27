@@ -5268,6 +5268,54 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_copy_as_markdown_detects_missing_opening_bracket_and_repairs(cx: &mut TestAppContext) {
+        ensure_theme_initialized(cx);
+        let (_, cx) = cx.add_window_view(|_, _| TestWindow);
+        let source = "BUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.\n\nAlso... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.";
+        let markdown = cx.new(|cx| Markdown::new(source.into(), None, None, cx));
+        cx.run_until_parked();
+
+        markdown.update(cx, |md, _cx| {
+            md.selection.start = 0;
+            md.selection.end = 6;
+            md.capture_for_context_menu(None, None);
+        });
+        cx.update(|_window, cx| {
+            let markdown = markdown.read(cx);
+            assert_eq!(
+                markdown
+                    .context_menu_selected_markdown()
+                    .map(SharedString::as_ref),
+                Some("[BUTING.md](./CONTRIBUTING.md)")
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_copy_as_markdown_completes_incomplete_link(cx: &mut TestAppContext) {
+        ensure_theme_initialized(cx);
+        let (_, cx) = cx.add_window_view(|_, _| TestWindow);
+        let source = "See [CONTRI";
+        let markdown = cx.new(|cx| Markdown::new(source.into(), None, None, cx));
+        cx.run_until_parked();
+
+        markdown.update(cx, |md, _cx| {
+            md.selection.start = 4;
+            md.selection.end = 11;
+            md.capture_for_context_menu(None, None);
+        });
+        cx.update(|_window, cx| {
+            let markdown = markdown.read(cx);
+            assert_eq!(
+                markdown
+                    .context_menu_selected_markdown()
+                    .map(SharedString::as_ref),
+                Some("[CONTRI]()")
+            );
+        });
+    }
+
+    #[gpui::test]
     fn test_preview_body_font_size_is_rem_based(cx: &mut TestAppContext) {
         ensure_theme_initialized(cx);
         let (_, cx) = cx.add_window_view(|_, _| TestWindow);
